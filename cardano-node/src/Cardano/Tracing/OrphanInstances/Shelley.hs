@@ -371,6 +371,8 @@ instance Era era => ToObject (UtxoPredicateFailure era) where
              , "network" .= network
              , "addrs"   .= addrs
              ]
+  toObject _verb ScriptsEmbargoed =
+    mkObject [ "kind" .= String "ScriptsEmbargoed" ]
 
 renderBadInputsUTxOErr ::  Set (TxIn era) -> Value
 renderBadInputsUTxOErr txIns
