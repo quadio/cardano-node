@@ -12,6 +12,9 @@ module Cardano.CLI.Shelley.Key
   , deserialiseInputAnyOf
   , renderInputDecodeError
 
+  , OutputDirection (..)
+  , serialiseInputToBech32AndWrite
+
   , readKeyFile
   , readKeyFileAnyOf
   , readKeyFileTextEnvelope
@@ -231,6 +234,33 @@ deserialiseInputAnyOf bech32Types textEnvTypes inputBs =
 
         -- The input was valid Bech32, but some other error occurred.
         Left err -> DeserialiseInputError $ InputBech32DecodeError err
+
+------------------------------------------------------------------------------
+-- Formatted/encoded output serialisation
+------------------------------------------------------------------------------
+
+-- | Where to write some output.
+data OutputDirection
+  = OutputDirectionStdout
+  -- ^ Write output to @stdout@.
+  | OutputDirectionFile !FilePath
+  -- ^ Write output to a provided file.
+  deriving (Eq, Show)
+
+serialiseInputToBech32AndWrite
+  :: SerialiseAsBech32 a
+  => OutputDirection
+  -> a
+  -> IO (Either (FileError ()) ())
+serialiseInputToBech32AndWrite outputDirection a =
+    case outputDirection of
+      OutputDirectionStdout -> Right <$> BSC.putStrLn outputBs
+      OutputDirectionFile fp ->
+        runExceptT $ handleIOExceptT (FileIOError fp) $
+          BS.writeFile fp outputBs
+  where
+    outputBs :: ByteString
+    outputBs = Text.encodeUtf8 (serialiseToBech32 a)
 
 ------------------------------------------------------------------------------
 -- Cryptographic key deserialisation
