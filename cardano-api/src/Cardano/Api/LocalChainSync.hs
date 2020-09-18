@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE QuantifiedConstraints #-}
 
 module Cardano.Api.LocalChainSync
   ( getLocalTip

@@ -7,6 +7,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE QuantifiedConstraints #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeApplications #-}
@@ -52,7 +53,7 @@ import           Ouroboros.Consensus.Block (BlockProtocol, CannotForge, ConvertR
 import           Ouroboros.Consensus.BlockchainTime (SystemStart (..),
                      TraceBlockchainTimeEvent (..))
 import           Ouroboros.Consensus.HeaderValidation (OtherHeaderEnvelopeError)
-import           Ouroboros.Consensus.Ledger.Abstract (LedgerErr, LedgerState)
+import           Ouroboros.Consensus.Ledger.Abstract (LedgerErr, LedgerState, Query)
 import           Ouroboros.Consensus.Ledger.Extended (ledgerState)
 import           Ouroboros.Consensus.Ledger.Inspect (InspectLedger, LedgerEvent)
 import           Ouroboros.Consensus.Ledger.SupportsMempool (ApplyTxErr, GenTx, GenTxId, HasTxs)
@@ -790,7 +791,9 @@ forgeStateInfoTracer p _ts tracer = Tracer $ \ev -> do
 --------------------------------------------------------------------------------
 
 nodeToClientTracers'
-  :: Show localPeer
+  :: ( Show localPeer
+     , forall result. Show (Query blk result)
+     )
   => TraceSelection
   -> TracingVerbosity
   -> Trace IO Text
