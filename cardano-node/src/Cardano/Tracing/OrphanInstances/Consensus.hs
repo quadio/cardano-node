@@ -157,6 +157,7 @@ instance HasSeverityAnnotation (TraceChainSyncClientEvent blk) where
   getSeverityAnnotation (TraceFoundIntersection _ _ _) = Info
   getSeverityAnnotation (TraceRolledBack _) = Notice
   getSeverityAnnotation (TraceException _) = Warning
+  getSeverityAnnotation (TraceTermination _) = Notice
 
 
 instance HasPrivacyAnnotation (TraceChainSyncServerEvent blk)
@@ -894,6 +895,9 @@ instance (ConvertRawHash blk, LedgerSupportsProtocol blk)
                , "exception" .= String (pack $ show exc) ]
     TraceFoundIntersection _ _ _ ->
       mkObject [ "kind" .= String "ChainSyncClientEvent.TraceFoundIntersection" ]
+    TraceTermination result ->
+      mkObject [ "kind" .= String "ChainSyncClientEvent.TraceTermination"
+               , "result" .= String (pack $ show result) ]
 
 
 instance ConvertRawHash blk

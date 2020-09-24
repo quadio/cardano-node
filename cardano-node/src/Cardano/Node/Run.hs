@@ -31,12 +31,12 @@ import           Data.Functor.Contravariant (contramap)
 import           Data.Maybe (catMaybes)
 import           Data.Proxy (Proxy (..))
 import           Data.Semigroup ((<>))
-import           Data.Text (Text, breakOn, pack, take, unlines)
+import           Data.Text (Text, breakOn, pack, take)
 import qualified Data.Text as Text
 import           Data.Version (showVersion)
 import           GHC.Clock (getMonotonicTimeNSec)
 import           Network.HostName (getHostName)
-import           Network.Socket (AddrInfo, Socket)
+import           Network.Socket (AddrInfo, SockAddr, Socket)
 import           System.Directory (canonicalizePath, createDirectoryIfMissing, makeAbsolute)
 import           System.Environment (lookupEnv)
 #ifdef UNIX
@@ -67,8 +67,8 @@ import qualified Ouroboros.Consensus.Cardano as Consensus
 import qualified Ouroboros.Consensus.Config as Consensus
 import           Ouroboros.Consensus.Config.SupportsNode (ConfigSupportsNode (..))
 import           Ouroboros.Consensus.Fragment.InFuture (defaultClockSkew)
-import           Ouroboros.Consensus.Node (DiffusionArguments (..), NodeArgs (..),
-                   NodeKernel, RunNode (..), RunNodeArgs (..))
+import           Ouroboros.Consensus.Node (DiffusionArguments (..),
+                   NodeArgs (..), NodeKernel, RunNode (..), RunNodeArgs (..))
 import qualified Ouroboros.Consensus.Node as Node (getChainDB, run)
 import           Ouroboros.Consensus.Node.NetworkProtocolVersion
 import           Ouroboros.Consensus.Node.ProtocolInfo
@@ -76,8 +76,9 @@ import           Ouroboros.Consensus.Util.Orphans ()
 import           Ouroboros.Network.BlockFetch (BlockFetchConfiguration (..))
 import           Ouroboros.Network.Magic (NetworkMagic (..))
 import           Ouroboros.Network.NodeToClient (LocalConnectionId)
-import           Ouroboros.Network.NodeToNode (AcceptedConnectionsLimit (..), DomainAddress,
-                   PeerAdvertise (..), PeerSelectionTargets (..), RemoteConnectionId)
+import           Ouroboros.Network.NodeToNode (AcceptedConnectionsLimit (..),
+                   DomainAddress, PeerAdvertise (..),
+                   PeerSelectionTargets (..), RemoteConnectionId)
 
 import qualified Ouroboros.Consensus.Storage.ChainDB as ChainDB
 import           Ouroboros.Consensus.Storage.ImmutableDB (ValidationPolicy (..))
@@ -237,10 +238,7 @@ handleSimpleNode p trace nodeTracers nc onKernel = do
   eitherTopology <- readTopologyFile nc
   nt <- either (\err -> panic $ "Cardano.Node.Run.handleSimpleNode.readTopologyFile: " <> err) pure eitherTopology
 
-  let diffusionTracers :: DiffusionTracers
-      diffusionTracers = createDiffusionTracers nodeTracers
-
-      dnsLocalRoots :: [(NodeDnsAddress, PeerAdvertise)]
+  let dnsLocalRoots :: [(NodeDnsAddress, PeerAdvertise)]
       ipLocalRoots  :: [(NodeIPAddress,  PeerAdvertise)]
       (ipLocalRoots, dnsLocalRoots) = producerAddresses nt
 
@@ -259,15 +257,20 @@ handleSimpleNode p trace nodeTracers nc onKernel = do
 
   ipv4 <- traverse getSocketOrSocketInfoAddr publicIPv4SocketOrAddr
   ipv6 <- traverse getSocketOrSocketInfoAddr publicIPv6SocketOrAddr
-  traceWith tracer $ unlines
-    [ ""
-    , "**************************************"
-    , "Addresses: "     <> show (catMaybes [ ipv4, ipv6 ])
-    , "DiffusionMode: " <> show (ncDiffusionMode nc)
-    , "DNS producers: " <> show dnsProducers
-    , "IP producers: "  <> show ipProducers
-    , "**************************************"
-    ]
+
+  meta <- mkLOMeta Notice Public
+  traceNamedObject
+    (appendName "addresses" trace)
+    (meta, LogMessage . Text.pack . show $ catMaybes [ipv4, ipv6])
+  traceNamedObject
+    (appendName "diffusion-mode" trace)
+    (meta, LogMessage . Text.pack . show . ncDiffusionMode $ nc)
+  traceNamedObject
+    (appendName "local-roots" trace)
+    (meta, LogMessage . Text.pack . show $ dnsLocalRoots)
+  traceNamedObject
+    (appendName "local-roots" trace)
+    (meta, LogMessage . Text.pack . show $ ipLocalRoots)
 
   withShutdownHandling nc trace $ \sfds ->
     void $
@@ -282,13 +285,13 @@ handleSimpleNode p trace nodeTracers nc onKernel = do
           rnNetworkMagic         = getNetworkMagic (Consensus.configBlock cfg),
           rnDatabasePath         = dbPath,
           rnProtocolInfo         = pInfo,
-          rnCustomiseChainDbArgs = customiseChainDbArgs $ validateDB npm,
+          rnCustomiseChainDbArgs = customiseChainDbArgs $ ncValidateDB nc,
           rnCustomiseNodeArgs    = customiseNodeArgs (ncMaxConcurrencyBulkSync nc)
                                      (ncMaxConcurrencyDeadline nc),
           rnNodeToNodeVersions   = supportedNodeToNodeVersions (Proxy @blk),
           rnNodeToClientVersions = supportedNodeToClientVersions (Proxy @blk),
           rnNodeKernelHook       = \registry nodeKernel -> do
-            maybeSpawnOnSlotSyncedShutdownHandler npm sfds trace registry
+            maybeSpawnOnSlotSyncedShutdownHandler nc sfds trace registry
               (Node.getChainDB nodeKernel)
             onKernel nodeKernel,
           rnMaxClockSkew         = defaultClockSkew
@@ -389,7 +392,6 @@ createDiffusionArguments
   -> SocketOrSocketInfo Socket SocketPath
   -- ^ Either a SOCKET_UNIX socket provided by systemd or a path for
   -- NodeToClient communication.
-  -> DiffusionMode
   -> [(SockAddr, PeerAdvertise)]
   -> [(DomainAddress, PeerAdvertise)]
   -> [DomainAddress]
@@ -398,12 +400,12 @@ createDiffusionArguments NodeConfiguration {
                            ncTargetNumberOfRootPeers,
                            ncTargetNumberOfKnownPeers,
                            ncTargetNumberOfEstablishedPeers,
-                           ncTargetNumberOfActivePeers
-                         }
+                           ncTargetNumberOfActivePeers,
+                           ncDiffusionMode
+                         } 
                          publicIPv4SocketsOrAddrs
                          publicIPv6SocketsOrAddrs
                          localSocketOrPath
-                         diffusionMode
                          daStaticLocalRootPeers
                          daLocalRootPeers
                          daPublicRootPeers
@@ -430,7 +432,7 @@ createDiffusionArguments NodeConfiguration {
       , acceptedConnectionsSoftLimit = 384
       , acceptedConnectionsDelay     = 5
       }
-    , daDiffusionMode = diffusionMode
+    , daDiffusionMode = ncDiffusionMode
     -- TODO: this should be configurable; the following gives something similar
     -- to the current node setup for pool operators.  It's rather conservative,
     -- just for start.
