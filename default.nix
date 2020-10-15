@@ -11,7 +11,7 @@
 # }'
 , sourcesOverride ? {}
 # pinned version of nixpkgs augmented with overlays (iohk-nix and our packages).
-, pkgs ? import ./nix/default.nix { inherit system crossSystem config sourcesOverride gitrev; }
+, pkgs ? import ./nix/default.nix { inherit system crossSystem config customConfig sourcesOverride gitrev; }
 # Git sha1 hash, to be passed when not building from a git work tree.
 , gitrev ? null
 }:
@@ -72,14 +72,13 @@ let
       tests = collectChecks haskellPackages;
 
       hlint = callPackage iohkNix.tests.hlint {
-        src = ./. ;
+        inherit src;
         projects = attrNames (selectProjectPackages cardanoNodeHaskellPackages);
       };
+
+      inherit cardano-node-tests;
     };
 
-    shell = import ./shell.nix {
-      inherit pkgs;
-      withHoogle = true;
-    };
+    shell = cardanoNodeShell;
 };
 in packages

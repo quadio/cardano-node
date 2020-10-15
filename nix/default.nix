@@ -1,6 +1,7 @@
 { system ? builtins.currentSystem
 , crossSystem ? null
 , config ? {}
+, customConfig ? {}
 , sourcesOverride ? {}
 , gitrev ? null
 }:
@@ -38,6 +39,11 @@ let
           // { inherit overlays sources nixpkgs; };
 
         svcLib = import ./svclib.nix { inherit pkgs; };
+
+        cardanoNodeShell = import ../shell.nix {
+          inherit pkgs sourcesOverride config customConfig;
+          withHoogle = true;
+        };
       })
       # And, of course, our haskell-nix-ified cabal project:
       (import ./pkgs.nix)
