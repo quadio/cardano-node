@@ -272,7 +272,6 @@ initialBlockchainCounters = BlockchainCounters 0 0 0 0 0
 mkTracers
   :: forall peer localPeer blk.
      ( Consensus.RunNode blk
-     , HasKESMetricsData blk
      , TraceConstraints blk
      , Show peer, Eq peer
      , Show localPeer
