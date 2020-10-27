@@ -20,14 +20,12 @@ import           Data.Text (pack)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 
-
 import           Cardano.Tracing.OrphanInstances.Common
 import           Cardano.Tracing.OrphanInstances.Network ()
-import           Cardano.Tracing.Render (renderChainHash, renderChunkNo,
-                     renderHeaderHash, renderHeaderHashForVerbosity,
-                     renderPoint, renderPointAsPhrase, renderPointForVerbosity,
-                     renderRealPointAsPhrase, renderTipForVerbosity,
-                     renderTipBlockNo, renderTipHash, renderWithOrigin)
+import           Cardano.Tracing.Render (renderChainHash, renderChunkNo, renderHeaderHash,
+                     renderHeaderHashForVerbosity, renderPoint, renderPointAsPhrase,
+                     renderPointForVerbosity, renderRealPoint, renderRealPointAsPhrase,
+                     renderTipBlockNo, renderTipForVerbosity, renderTipHash, renderWithOrigin)
 
 import           Ouroboros.Consensus.Block (BlockProtocol, CannotForge, ConvertRawHash (..),
                      ForgeStateUpdateError, Header, RealPoint, getHeader, headerPoint,
@@ -337,113 +335,109 @@ instance ( ConvertRawHash blk
       => Transformable Text IO (ChainDB.TraceEvent blk) where
   trTransformer = trStructuredText
 
-
-
-
-
 instance ( ConvertRawHash blk
          , LedgerSupportsProtocol blk
          , InspectLedger blk)
       => HasTextFormatter (ChainDB.TraceEvent blk) where
-    formatText = \case
+    formatText tev _obj = case tev of
       ChainDB.TraceAddBlockEvent ev -> case ev of
-        ChainDB.IgnoreBlockOlderThanK pt -> const $
+        ChainDB.IgnoreBlockOlderThanK pt ->
           "Ignoring block older than K: " <> renderRealPointAsPhrase pt
-        ChainDB.IgnoreBlockAlreadyInVolatileDB pt -> \_o ->
+        ChainDB.IgnoreBlockAlreadyInVolatileDB pt ->
           "Ignoring block already in DB: " <> renderRealPointAsPhrase pt
-        ChainDB.IgnoreInvalidBlock pt _reason -> \_o ->
+        ChainDB.IgnoreInvalidBlock pt _reason ->
           "Ignoring previously seen invalid block: " <> renderRealPointAsPhrase pt
-        ChainDB.AddedBlockToQueue pt sz -> \_o ->
+        ChainDB.AddedBlockToQueue pt sz ->
           "Block added to queue: " <> renderRealPointAsPhrase pt <> " queue size " <> condenseT sz
-        ChainDB.BlockInTheFuture pt slot -> \_o ->
+        ChainDB.BlockInTheFuture pt slot ->
           "Ignoring block from future: " <> renderRealPointAsPhrase pt <> ", slot " <> condenseT slot
-        ChainDB.StoreButDontChange pt -> \_o ->
+        ChainDB.StoreButDontChange pt ->
           "Ignoring block: " <> renderRealPointAsPhrase pt
-        ChainDB.TryAddToCurrentChain pt -> \_o ->
+        ChainDB.TryAddToCurrentChain pt ->
           "Block fits onto the current chain: " <> renderRealPointAsPhrase pt
-        ChainDB.TrySwitchToAFork pt _ -> \_o ->
+        ChainDB.TrySwitchToAFork pt _ ->
           "Block fits onto some fork: " <> renderRealPointAsPhrase pt
-        ChainDB.AddedToCurrentChain es _ _ c -> \_o ->
+        ChainDB.AddedToCurrentChain es _ _ c ->
           "Chain extended, new tip: " <> renderPointAsPhrase (AF.headPoint c) <>
           Text.concat [ "\nEvent: " <> showT e | e <- es ]
-        ChainDB.SwitchedToAFork es _ _ c -> \_o ->
+        ChainDB.SwitchedToAFork es _ _ c ->
           "Switched to a fork, new tip: " <> renderPointAsPhrase (AF.headPoint c) <>
           Text.concat [ "\nEvent: " <> showT e | e <- es ]
         ChainDB.AddBlockValidation ev' -> case ev' of
-          ChainDB.InvalidBlock err pt -> \_o ->
+          ChainDB.InvalidBlock err pt ->
             "Invalid block " <> renderRealPointAsPhrase pt <> ": " <> showT err
-          ChainDB.InvalidCandidate c -> \_o ->
+          ChainDB.InvalidCandidate c ->
             "Invalid candidate " <> renderPointAsPhrase (AF.headPoint c)
-          ChainDB.ValidCandidate c -> \_o ->
+          ChainDB.ValidCandidate c ->
             "Valid candidate " <> renderPointAsPhrase (AF.headPoint c)
-          ChainDB.CandidateContainsFutureBlocks c hdrs -> \_o ->
+          ChainDB.CandidateContainsFutureBlocks c hdrs ->
             "Candidate contains blocks from near future:  " <>
             renderPointAsPhrase (AF.headPoint c) <> ", slots " <>
             Text.intercalate ", " (map (renderPoint . headerPoint) hdrs)
-          ChainDB.CandidateContainsFutureBlocksExceedingClockSkew c hdrs -> \_o ->
+          ChainDB.CandidateContainsFutureBlocksExceedingClockSkew c hdrs ->
             "Candidate contains blocks from future exceeding clock skew limit: " <>
             renderPointAsPhrase (AF.headPoint c) <> ", slots " <>
             Text.intercalate ", " (map (renderPoint . headerPoint) hdrs)
-        ChainDB.AddedBlockToVolatileDB pt _ _ -> \_o ->
+        ChainDB.AddedBlockToVolatileDB pt _ _ ->
           "Chain added block " <> renderRealPointAsPhrase pt
-        ChainDB.ChainSelectionForFutureBlock pt -> \_o ->
+        ChainDB.ChainSelectionForFutureBlock pt ->
           "Chain selection run for block previously from future: " <> renderRealPointAsPhrase pt
       ChainDB.TraceLedgerReplayEvent ev -> case ev of
-        LedgerDB.ReplayFromGenesis _replayTo -> \_o ->
+        LedgerDB.ReplayFromGenesis _replayTo ->
           "Replaying ledger from genesis"
-        LedgerDB.ReplayFromSnapshot snap tip' _replayTo -> \_o ->
+        LedgerDB.ReplayFromSnapshot snap tip' _replayTo ->
           "Replaying ledger from snapshot " <> showT snap <> " at " <>
             renderPointAsPhrase tip'
-        LedgerDB.ReplayedBlock pt _ledgerEvents replayTo -> \_o ->
+        LedgerDB.ReplayedBlock pt _ledgerEvents replayTo ->
           "Replayed block: slot " <> showT (realPointSlot pt) <> " of " <> showT (pointSlot replayTo)
       ChainDB.TraceLedgerEvent ev -> case ev of
-        LedgerDB.TookSnapshot snap pt -> \_o ->
+        LedgerDB.TookSnapshot snap pt ->
           "Took ledger snapshot " <> showT snap <>
           " at " <> renderPointAsPhrase pt
-        LedgerDB.DeletedSnapshot snap -> \_o ->
+        LedgerDB.DeletedSnapshot snap ->
           "Deleted old snapshot " <> showT snap
-        LedgerDB.InvalidSnapshot snap failure -> \_o ->
+        LedgerDB.InvalidSnapshot snap failure ->
           "Invalid snapshot " <> showT snap <> showT failure
       ChainDB.TraceCopyToImmutableDBEvent ev -> case ev of
-        ChainDB.CopiedBlockToImmutableDB pt -> \_o ->
+        ChainDB.CopiedBlockToImmutableDB pt ->
           "Copied block " <> renderPointAsPhrase pt <> " to the ImmutableDB"
-        ChainDB.NoBlocksToCopyToImmutableDB -> \_o ->
+        ChainDB.NoBlocksToCopyToImmutableDB ->
           "There are no blocks to copy to the ImmutableDB"
       ChainDB.TraceGCEvent ev -> case ev of
-        ChainDB.PerformedGC slot -> \_o ->
+        ChainDB.PerformedGC slot ->
           "Performed a garbage collection for " <> condenseT slot
-        ChainDB.ScheduledGC slot _difft -> \_o ->
+        ChainDB.ScheduledGC slot _difft ->
           "Scheduled a garbage collection for " <> condenseT slot
       ChainDB.TraceOpenEvent ev -> case ev of
-        ChainDB.OpenedDB immTip tip' -> \_o ->
+        ChainDB.OpenedDB immTip tip' ->
           "Opened db with immutable tip at " <> renderPointAsPhrase immTip <>
           " and tip " <> renderPointAsPhrase tip'
-        ChainDB.ClosedDB immTip tip' -> \_o ->
+        ChainDB.ClosedDB immTip tip' ->
           "Closed db with immutable tip at " <> renderPointAsPhrase immTip <>
           " and tip " <> renderPointAsPhrase tip'
-        ChainDB.OpenedImmutableDB immTip chunk -> \_o ->
+        ChainDB.OpenedImmutableDB immTip chunk ->
           "Opened imm db with immutable tip at " <> renderPointAsPhrase immTip <>
           " and chunk " <> showT chunk
-        ChainDB.OpenedVolatileDB -> \_o -> "Opened vol db"
-        ChainDB.OpenedLgrDB -> \_o -> "Opened lgr db"
+        ChainDB.OpenedVolatileDB ->  "Opened vol db"
+        ChainDB.OpenedLgrDB ->  "Opened lgr db"
       ChainDB.TraceReaderEvent ev -> case ev of
-        ChainDB.NewReader -> \_o -> "New reader was created"
-        ChainDB.ReaderNoLongerInMem _ -> \_o -> "ReaderNoLongerInMem"
-        ChainDB.ReaderSwitchToMem _ _ -> \_o -> "ReaderSwitchToMem"
-        ChainDB.ReaderNewImmIterator _ _ -> \_o -> "ReaderNewImmIterator"
+        ChainDB.NewReader ->  "New reader was created"
+        ChainDB.ReaderNoLongerInMem _ ->  "ReaderNoLongerInMem"
+        ChainDB.ReaderSwitchToMem _ _ ->  "ReaderSwitchToMem"
+        ChainDB.ReaderNewImmIterator _ _ ->  "ReaderNewImmIterator"
       ChainDB.TraceInitChainSelEvent ev -> case ev of
-        ChainDB.InitChainSelValidation _ -> \_o -> "InitChainSelValidation"
+        ChainDB.InitChainSelValidation _ ->  "InitChainSelValidation"
       ChainDB.TraceIteratorEvent ev -> case ev of
-        ChainDB.UnknownRangeRequested _ -> \_o -> "UnknownRangeRequested"
-        ChainDB.BlockMissingFromVolatileDB _ -> \_o -> "BlockMissingFromVolatileDB"
-        ChainDB.StreamFromImmutableDB _ _ -> \_o -> "StreamFromImmutableDB"
-        ChainDB.StreamFromBoth _ _ _ -> \_o -> "StreamFromBoth"
-        ChainDB.StreamFromVolatileDB _ _ _ -> \_o -> "StreamFromVolatileDB"
-        ChainDB.BlockWasCopiedToImmutableDB _ -> \_o -> "BlockWasCopiedToImmutableDB"
-        ChainDB.BlockGCedFromVolatileDB _ -> \_o -> "BlockGCedFromVolatileDB"
-        ChainDB.SwitchBackToVolatileDB -> \_o -> "SwitchBackToVolatileDB"
-      ChainDB.TraceImmutableDBEvent _ev -> \_o -> "TraceImmutableDBEvent"
-      ChainDB.TraceVolatileDBEvent _ev -> \_o -> "TraceVolatileDBEvent"
+        ChainDB.UnknownRangeRequested _ ->  "UnknownRangeRequested"
+        ChainDB.BlockMissingFromVolatileDB _ ->  "BlockMissingFromVolatileDB"
+        ChainDB.StreamFromImmutableDB _ _ ->  "StreamFromImmutableDB"
+        ChainDB.StreamFromBoth _ _ _ ->  "StreamFromBoth"
+        ChainDB.StreamFromVolatileDB _ _ _ ->  "StreamFromVolatileDB"
+        ChainDB.BlockWasCopiedToImmutableDB _ ->  "BlockWasCopiedToImmutableDB"
+        ChainDB.BlockGCedFromVolatileDB _ ->  "BlockGCedFromVolatileDB"
+        ChainDB.SwitchBackToVolatileDB ->  "SwitchBackToVolatileDB"
+      ChainDB.TraceImmutableDBEvent _ev ->  "TraceImmutableDBEvent"
+      ChainDB.TraceVolatileDBEvent _ev ->  "TraceVolatileDBEvent"
 
 
 --
@@ -747,13 +741,63 @@ instance ( ConvertRawHash blk
       mkObject [ "kind" .= String "TraceReaderEvent.ReaderSwitchToMem" ]
     ChainDB.ReaderNewImmIterator _ _ ->
       mkObject [ "kind" .= String "TraceReaderEvent.ReaderNewImmIterator" ]
-  toObject _verb (ChainDB.TraceInitChainSelEvent ev) = case ev of
-    ChainDB.InitChainSelValidation _ ->
-      mkObject [ "kind" .= String "InitChainSelValidation" ]
+  toObject verb (ChainDB.TraceInitChainSelEvent ev) = case ev of
+    ChainDB.InitChainSelValidation ev' -> case ev' of
+      ChainDB.InvalidBlock err pt ->
+         mkObject [ "kind" .= String "TraceInitChainSelEvent.InvalidBlock"
+                  , "block" .= toObject verb pt
+                  , "error" .= show err ]
+      ChainDB.InvalidCandidate c ->
+        mkObject [ "kind" .= String "TraceInitChainSelEvent.InvalidCandidate"
+                 , "block" .= renderPointForVerbosity verb (AF.headPoint c) ]
+      ChainDB.ValidCandidate c ->
+        mkObject [ "kind" .= String "TraceInitChainSelEvent.ValidCandidate"
+                 , "block" .= renderPointForVerbosity verb (AF.headPoint c) ]
+      ChainDB.CandidateContainsFutureBlocks c hdrs ->
+        mkObject [ "kind" .= String "TraceInitChainSelEvent.CandidateContainsFutureBlocks"
+                 , "block"   .= renderPointForVerbosity verb (AF.headPoint c)
+                 , "headers" .= map (renderPointForVerbosity verb . headerPoint) hdrs ]
+      ChainDB.CandidateContainsFutureBlocksExceedingClockSkew c hdrs ->
+        mkObject [ "kind" .= String "TraceInitChainSelEvent.CandidateContainsFutureBlocksExceedingClockSkew"
+                 , "block"   .= renderPointForVerbosity verb (AF.headPoint c)
+                 , "headers" .= map (renderPointForVerbosity verb . headerPoint) hdrs ]
   toObject _verb (ChainDB.TraceIteratorEvent ev) = case ev of
-    ChainDB.StreamFromVolatileDB _ _ _ ->
-      mkObject [ "kind" .= String "StreamFromVolatileDB" ]
-    _ -> emptyObject  -- TODO add more iterator events
+    ChainDB.UnknownRangeRequested unkRange ->
+      mkObject [ "kind" .= String "TraceIteratorEvent.UnknownRangeRequested"
+               , "range" .= String (Text.pack $ show unkRange)
+               ]
+    ChainDB.StreamFromVolatileDB streamFrom streamTo realPt ->
+      mkObject [ "kind" .= String "TraceIteratorEvent.StreamFromVolatileDB"
+               , "from" .= String (Text.pack $ show streamFrom)
+               , "to" .= String (Text.pack $ show streamTo)
+               , "point" .= String (Text.pack . show $ map renderRealPoint realPt)
+               ]
+    ChainDB.StreamFromImmutableDB streamFrom streamTo ->
+      mkObject [ "kind" .= String "TraceIteratorEvent.StreamFromImmutableDB"
+               , "from" .= String (Text.pack $ show streamFrom)
+               , "to" .= String (Text.pack $ show streamTo)
+               ]
+    ChainDB.StreamFromBoth streamFrom streamTo realPt ->
+      mkObject [ "kind" .= String "TraceIteratorEvent.StreamFromBoth"
+               , "from" .= String (Text.pack $ show streamFrom)
+               , "to" .= String (Text.pack $ show streamTo)
+               , "point" .= String (Text.pack . show $ map renderRealPoint realPt)
+               ]
+    ChainDB.BlockMissingFromVolatileDB realPt ->
+      mkObject [ "kind" .= String "TraceIteratorEvent.BlockMissingFromVolatileDB"
+               , "point" .= String (renderRealPoint realPt)
+               ]
+    ChainDB.BlockWasCopiedToImmutableDB realPt ->
+      mkObject [ "kind" .= String "TraceIteratorEvent.BlockWasCopiedToImmutableDB"
+               , "point" .= String (renderRealPoint realPt)
+               ]
+    ChainDB.BlockGCedFromVolatileDB realPt ->
+      mkObject ["kind" .= String "TraceIteratorEvent.BlockGCedFromVolatileDB"
+               , "point" .= String (renderRealPoint realPt)
+               ]
+    ChainDB.SwitchBackToVolatileDB ->
+      mkObject ["kind" .= String "TraceIteratorEvent.SwitchBackToVolatileDB"
+               ]
   toObject verb (ChainDB.TraceImmutableDBEvent ev) = case ev of
     ImmDB.NoValidLastLocation -> mkObject [ "kind" .= String "TraceImmutableDBEvent.NoValidLastLocation" ]
     ImmDB.ValidatedLastLocation chunkNo immTip ->
