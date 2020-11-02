@@ -28,6 +28,7 @@ import qualified Control.Concurrent.Async as Async
 import           Control.Exception (IOException)
 import           Control.Exception.Safe (MonadCatch)
 import           Control.Monad.Trans.Except.Extra (catchIOExceptT)
+import           Control.Tracer
 
 import           Cardano.BM.Backend.Aggregation (plugin)
 import           Cardano.BM.Backend.EKGView (plugin)
@@ -41,17 +42,13 @@ import qualified Cardano.BM.Configuration.Model as CM
 #endif
 import qualified Cardano.BM.Configuration as Config
 import qualified Cardano.BM.Configuration.Model as Config
-import           Cardano.BM.Counters (readCounters)
 import           Cardano.BM.Data.Backend (Backend, BackendKind)
-import           Cardano.BM.Data.Counter
 import           Cardano.BM.Data.LogItem (LOContent (..), LOMeta (..), LoggerName,
-                     PrivacyAnnotation (..), mkLOMeta)
-import           Cardano.BM.Data.Observable
+                     mkLOMeta)
 #ifdef UNIX
 import           Cardano.BM.Data.Output
 #endif
 import           Cardano.BM.Data.Severity (Severity (..))
-import           Cardano.BM.Data.SubTrace
 import qualified Cardano.BM.Observer.Monadic as Monadic
 import qualified Cardano.BM.Observer.STM as Stm
 import           Cardano.BM.Plugin (loadPlugin)
@@ -59,12 +56,15 @@ import           Cardano.BM.Plugin (loadPlugin)
 import           Cardano.BM.Scribe.Systemd (plugin)
 #endif
 import           Cardano.BM.Setup (setupTrace_, shutdown)
-import           Cardano.BM.Trace (Trace, appendName, traceNamedObject)
+import           Cardano.BM.Stats
+import           Cardano.BM.Trace (Trace, appendName)
 import qualified Cardano.BM.Trace as Trace
+import           Cardano.BM.Tracing
 
 import           Cardano.Config.Git.Rev (gitRev)
 import           Cardano.Node.Configuration.POM (NodeConfiguration (..))
 import           Cardano.Node.Types
+import           Cardano.Tracing.OrphanInstances.Common()
 
 --------------------------------
 -- Layer
@@ -227,19 +227,14 @@ createLoggingLayer ver nodeConfig' = do
    startCapturingMetrics :: Trace IO Text -> IO ()
    startCapturingMetrics trace0 = do
      let trace = appendName "node-metrics" trace0
-         counters = [MemoryStats, ProcessStats, NetStats, IOStats, GhcRtsStats, SysStats]
      _ <- Async.async $ forever $ do
-       cts <- readCounters (ObservableTraceSelf counters)
-       traceCounters trace cts
-       threadDelay 30000000   -- 30 seconds
+       stats <- readResourceStats
+       case stats of
+         Nothing -> pure ()
+         Just ps -> do
+           traceWith (toLogObject' NormalVerbosity trace) ps
+       threadDelay 1000000 -- TODO:  make configurable
      pure ()
-    where
-      traceCounters :: forall m a. MonadIO m => Trace m a -> [Counter] -> m ()
-      traceCounters _tr [] = return ()
-      traceCounters tr (c@(Counter _ct cn cv) : cs) = do
-        mle <- mkLOMeta Notice Confidential
-        traceNamedObject tr (mle, LogValue (nameCounter c <> "." <> cn) cv)
-        traceCounters tr cs
 
 shutdownLoggingLayer :: LoggingLayer -> IO ()
 shutdownLoggingLayer = shutdown . llSwitchboard
