@@ -428,13 +428,35 @@ instance ( ConvertRawHash blk
       ChainDB.TraceInitChainSelEvent ev -> case ev of
         ChainDB.InitChainSelValidation _ ->  "InitChainSelValidation"
       ChainDB.TraceIteratorEvent ev -> case ev of
-        ChainDB.UnknownRangeRequested _ ->  "UnknownRangeRequested"
-        ChainDB.BlockMissingFromVolatileDB _ ->  "BlockMissingFromVolatileDB"
-        ChainDB.StreamFromImmutableDB _ _ ->  "StreamFromImmutableDB"
-        ChainDB.StreamFromBoth _ _ _ ->  "StreamFromBoth"
-        ChainDB.StreamFromVolatileDB _ _ _ ->  "StreamFromVolatileDB"
-        ChainDB.BlockWasCopiedToImmutableDB _ ->  "BlockWasCopiedToImmutableDB"
-        ChainDB.BlockGCedFromVolatileDB _ ->  "BlockGCedFromVolatileDB"
+        ChainDB.UnknownRangeRequested ev' ->
+          case ev' of
+            ChainDB.MissingBlock realPt ->
+              "The block at the given point was not found in the ChainDB."
+              <> renderRealPoint realPt
+            ChainDB.ForkTooOld streamFrom ->
+              "The requested range forks off too far in the past"
+              <> showT streamFrom
+        ChainDB.BlockMissingFromVolatileDB realPt ->
+          "This block is no longer in the VolatileDB because it has been garbage\
+           \ collected. It might now be in the ImmutableDB if it was part of the\
+           \ current chain. Block: " <> renderRealPoint realPt
+        ChainDB.StreamFromImmutableDB sFrom sTo ->
+          "Stream only from the ImmutableDB. StreamFrom:" <> showT sFrom <>
+          " StreamTo: " <> showT sTo
+        ChainDB.StreamFromBoth sFrom sTo pts ->
+          "Stream from both the VolatileDB and the ImmutableDB."
+          <> " StreamFrom: " <> showT sFrom <> " StreamTo: " <> showT sTo
+          <> " Points: " <> showT (map renderRealPoint pts)
+        ChainDB.StreamFromVolatileDB sFrom sTo pts ->
+          "Stream only from the VolatileDB."
+          <> " StreamFrom: " <> showT sFrom <> " StreamTo: " <> showT sTo
+          <> " Points: " <> showT (map renderRealPoint pts)
+        ChainDB.BlockWasCopiedToImmutableDB pt ->
+          "This block has been garbage collected from the VolatileDB is now\
+          \ found and streamed from the ImmutableDB. Block: " <> renderRealPoint pt
+        ChainDB.BlockGCedFromVolatileDB pt ->
+          "This block no longer in the VolatileDB and isn't in the ImmutableDB\
+          \ either; it wasn't part of the current chain. Block: " <> renderRealPoint pt
         ChainDB.SwitchBackToVolatileDB ->  "SwitchBackToVolatileDB"
       ChainDB.TraceImmutableDBEvent _ev ->  "TraceImmutableDBEvent"
       ChainDB.TraceVolatileDBEvent _ev ->  "TraceVolatileDBEvent"
@@ -764,23 +786,23 @@ instance ( ConvertRawHash blk
   toObject _verb (ChainDB.TraceIteratorEvent ev) = case ev of
     ChainDB.UnknownRangeRequested unkRange ->
       mkObject [ "kind" .= String "TraceIteratorEvent.UnknownRangeRequested"
-               , "range" .= String (Text.pack $ show unkRange)
+               , "range" .= String (showT unkRange)
                ]
     ChainDB.StreamFromVolatileDB streamFrom streamTo realPt ->
       mkObject [ "kind" .= String "TraceIteratorEvent.StreamFromVolatileDB"
-               , "from" .= String (Text.pack $ show streamFrom)
-               , "to" .= String (Text.pack $ show streamTo)
+               , "from" .= String (showT streamFrom)
+               , "to" .= String (showT streamTo)
                , "point" .= String (Text.pack . show $ map renderRealPoint realPt)
                ]
     ChainDB.StreamFromImmutableDB streamFrom streamTo ->
       mkObject [ "kind" .= String "TraceIteratorEvent.StreamFromImmutableDB"
-               , "from" .= String (Text.pack $ show streamFrom)
-               , "to" .= String (Text.pack $ show streamTo)
+               , "from" .= String (showT streamFrom)
+               , "to" .= String (showT streamTo)
                ]
     ChainDB.StreamFromBoth streamFrom streamTo realPt ->
       mkObject [ "kind" .= String "TraceIteratorEvent.StreamFromBoth"
-               , "from" .= String (Text.pack $ show streamFrom)
-               , "to" .= String (Text.pack $ show streamTo)
+               , "from" .= String (showT streamFrom)
+               , "to" .= String (showT streamTo)
                , "point" .= String (Text.pack . show $ map renderRealPoint realPt)
                ]
     ChainDB.BlockMissingFromVolatileDB realPt ->
@@ -792,7 +814,7 @@ instance ( ConvertRawHash blk
                , "point" .= String (renderRealPoint realPt)
                ]
     ChainDB.BlockGCedFromVolatileDB realPt ->
-      mkObject ["kind" .= String "TraceIteratorEvent.BlockGCedFromVolatileDB"
+      mkObject [ "kind" .= String "TraceIteratorEvent.BlockGCedFromVolatileDB"
                , "point" .= String (renderRealPoint realPt)
                ]
     ChainDB.SwitchBackToVolatileDB ->
@@ -817,7 +839,7 @@ instance ( ConvertRawHash blk
     ImmDB.InvalidChunkFile chunkNo (ImmDB.ChunkErrRead readIncErr) ->
       mkObject [ "kind" .= String "TraceImmutableDBEvent.InvalidChunkFile.ChunkErrRead"
                , "chunkNo" .= String (renderChunkNo chunkNo)
-               , "error" .= String (Text.pack $ show readIncErr)
+               , "error" .= String (showT readIncErr)
                ]
     ImmDB.InvalidChunkFile chunkNo (ImmDB.ChunkErrHashMismatch hashPrevBlock prevHashOfBlock) ->
       mkObject [ "kind" .= String "TraceImmutableDBEvent.InvalidChunkFile.ChunkErrHashMismatch"
@@ -875,44 +897,44 @@ instance ( ConvertRawHash blk
         ImmDB.TraceCurrentChunkHit chunkNo nbPastChunksInCache ->
           mkObject [ "kind" .= String "TraceImmDbEvent.TraceCacheEvent.TraceCurrentChunkHit"
                    , "chunkNo" .= String (renderChunkNo chunkNo)
-                   , "noPastChunks" .= String (Text.pack $ show nbPastChunksInCache)
+                   , "noPastChunks" .= String (showT nbPastChunksInCache)
                    ]
         ImmDB.TracePastChunkHit chunkNo nbPastChunksInCache ->
           mkObject [ "kind" .= String "TraceImmDbEvent.TraceCacheEvent.TracePastChunkHit"
                    , "chunkNo" .= String (renderChunkNo chunkNo)
-                   , "noPastChunks" .= String (Text.pack $ show nbPastChunksInCache)
+                   , "noPastChunks" .= String (showT nbPastChunksInCache)
                    ]
         ImmDB.TracePastChunkMiss chunkNo nbPastChunksInCache ->
           mkObject [ "kind" .= String "TraceImmDbEvent.TraceCacheEvent.TracePastChunkMiss"
                    , "chunkNo" .= String (renderChunkNo chunkNo)
-                   , "noPastChunks" .= String (Text.pack $ show nbPastChunksInCache)
+                   , "noPastChunks" .= String (showT nbPastChunksInCache)
                    ]
         ImmDB.TracePastChunkEvict chunkNo nbPastChunksInCache ->
           mkObject [ "kind" .= String "TraceImmDbEvent.TraceCacheEvent.TracePastChunkEvict"
                    , "chunkNo" .= String (renderChunkNo chunkNo)
-                   , "noPastChunks" .= String (Text.pack $ show nbPastChunksInCache)
+                   , "noPastChunks" .= String (showT nbPastChunksInCache)
                    ]
         ImmDB.TracePastChunksExpired chunkNos nbPastChunksInCache ->
           mkObject [ "kind" .= String "TraceImmDbEvent.TraceCacheEvent.TracePastChunksExpired"
                    , "chunkNos" .= String (Text.pack . show $ map renderChunkNo chunkNos)
-                   , "noPastChunks" .= String (Text.pack $ show nbPastChunksInCache)
+                   , "noPastChunks" .= String (showT nbPastChunksInCache)
                    ]
   toObject _verb (ChainDB.TraceVolatileDBEvent ev) = case ev of
     VolDb.DBAlreadyClosed -> mkObject [ "kind" .= String "TraceVolatileDbEvent.DBAlreadyClosed"]
     VolDb.DBAlreadyOpen -> mkObject [ "kind" .= String "TraceVolatileDbEvent.DBAlreadyOpen"]
     VolDb.BlockAlreadyHere blockId ->
       mkObject [ "kind" .= String "TraceVolatileDbEvent.BlockAlreadyHere"
-               , "blockId" .= String (Text.pack $ show blockId)
+               , "blockId" .= String (showT blockId)
                ]
     VolDb.TruncateCurrentFile fsPath ->
       mkObject [ "kind" .= String "TraceVolatileDbEvent.TruncateCurrentFile"
-               , "file" .= String (Text.pack $ show fsPath)
+               , "file" .= String (showT fsPath)
                ]
     VolDb.Truncate pErr fsPath blockOffset ->
       mkObject [ "kind" .= String "TraceVolatileDbEvent.Truncate"
-               , "parserError" .= String (Text.pack $ show pErr)
-               , "file" .= String (Text.pack $ show fsPath)
-               , "blockOffset" .= String (Text.pack $ show blockOffset)
+               , "parserError" .= String (showT pErr)
+               , "file" .= String (showT fsPath)
+               , "blockOffset" .= String (showT blockOffset)
                ]
     VolDb.InvalidFileNames fsPaths ->
       mkObject [ "kind" .= String "TraceVolatileDBEvent.InvalidFileNames"
