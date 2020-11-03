@@ -103,9 +103,12 @@ library
                      , ouroboros-consensus-shelley
                      , ouroboros-network
                      , process
+                     , QuickCheck
                      , scientific
                      , shelley-spec-ledger
+                     , shelley-spec-ledger-test
                      , small-steps
+                     , split
                      , text
                      , time
                      , transformers
