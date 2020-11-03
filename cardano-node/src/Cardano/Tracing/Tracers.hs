@@ -38,7 +38,7 @@ import qualified Network.Socket as Socket (SockAddr)
 import           Control.Tracer
 import           Control.Tracer.Transformers
 
-import           Cardano.Slotting.Slot (EpochNo (..))
+import           Cardano.Slotting.Slot (EpochNo (..), SlotNo (..))
 
 import           Cardano.BM.Data.Aggregated (Measurable (..))
 import           Cardano.BM.Data.LogItem (LOContent (..), LoggerName)
@@ -54,7 +54,7 @@ import           Ouroboros.Consensus.BlockchainTime (SystemStart (..),
                      TraceBlockchainTimeEvent (..))
 import           Ouroboros.Consensus.HeaderValidation (OtherHeaderEnvelopeError)
 import           Ouroboros.Consensus.Ledger.Abstract (LedgerErr, LedgerState)
-import           Ouroboros.Consensus.Ledger.Extended (ledgerState)
+import           Ouroboros.Consensus.Ledger.Extended (ExtLedgerState, ledgerState)
 import           Ouroboros.Consensus.Ledger.Inspect (InspectLedger, LedgerEvent)
 import           Ouroboros.Consensus.Ledger.SupportsMempool (ApplyTxErr, GenTx, GenTxId, HasTxs)
 import           Ouroboros.Consensus.Ledger.SupportsProtocol (LedgerSupportsProtocol)
@@ -454,8 +454,12 @@ mkConsensusTracers trSel verb tr nodeKern bcCounters = do
     , Consensus.localTxSubmissionServerTracer = tracerOnOff (traceLocalTxSubmissionServer trSel) verb "LocalTxSubmissionServer" tr
     , Consensus.mempoolTracer = tracerOnOff' (traceMempool trSel) $ mempoolTracer trSel tr bcCounters
     , Consensus.forgeTracer = tracerOnOff' (traceForge trSel) $
-        Tracer $ \(Consensus.TraceLabelCreds _ ev) -> do
-          traceWith (forgeTracer verb tr forgeTracers nodeKern bcCounters) ev
+        Tracer $ \tlcev@(Consensus.TraceLabelCreds _ ev) -> do
+          traceWith (annotateSeverity
+                     $ traceLeadershipChecks forgeTracers nodeKern verb
+                     $ appendName "LeadershipCheck" tr) tlcev
+          traceWith (forgeTracer verb tr forgeTracers fStats) tlcev
+          -- Don't track credentials in ForgeTime.
           traceWith (blockForgeOutcomeExtractor
                     $ toLogObject' verb
                     $ appendName "ForgeTime" tr) ev
@@ -485,6 +489,41 @@ mkConsensusTracers trSel verb tr nodeKern bcCounters = do
        <*> counting (liftCounting staticMeta name "slot-is-immutable" tr)
        <*> counting (liftCounting staticMeta name "node-is-leader" tr)
 
+traceLeadershipChecks ::
+  forall blk
+  . ( Consensus.RunNode blk
+     , LedgerQueries blk
+     )
+  => ForgeTracers
+  -> NodeKernelData blk
+  -> TracingVerbosity
+  -> Trace IO Text
+  -> Tracer IO (WithSeverity (Consensus.TraceLabelCreds (Consensus.TraceForgeEvent blk)))
+traceLeadershipChecks _ft nodeKern _tverb tr = Tracer $
+  \(WithSeverity sev (Consensus.TraceLabelCreds creds event)) ->
+    case event of
+      Consensus.TraceStartLeadershipCheck slot -> do
+        !query <- mapNodeKernelDataIO
+                    (\nk ->
+                       (,) <$> nkQueryLedger (ledgerUtxoSize . ledgerState) nk
+                           <*> nkQueryChain fragmentChainDensity nk)
+                    nodeKern
+        meta <- mkLOMeta sev Public
+        traceNamedObject tr
+          ( meta
+          , LogStructured $ Map.fromList $
+            [("kind", String "TraceStartLeadershipCheck")
+            ,("credentials", String creds)
+            ,("slot", toJSON $ unSlotNo slot)]
+            ++ fromSMaybe []
+               (query <&>
+                 \(utxoSize, chainDensity) ->
+                   [ ("utxoSize",     toJSON utxoSize)
+                   , ("chainDensity", toJSON (fromRational chainDensity :: Float))
+                   ])
+          )
+      _ -> pure ()
+
 teeForge ::
   forall blk
   . ( Consensus.RunNode blk
@@ -496,12 +535,12 @@ teeForge ::
      , ToObject (ForgeStateUpdateError blk)
      )
   => ForgeTracers
-  -> NodeKernelData blk
   -> TracingVerbosity
   -> Trace IO Text
-  -> Tracer IO (WithSeverity (Consensus.TraceForgeEvent blk))
-teeForge ft nodeKern tverb tr = Tracer $ \ev@(WithSeverity sev event) -> do
-  flip traceWith ev $ fanning $ \(WithSeverity _ e) ->
+  -> Tracer IO (WithSeverity (Consensus.TraceLabelCreds (Consensus.TraceForgeEvent blk)))
+teeForge ft tverb tr = Tracer $
+ \ev@(WithSeverity sev (Consensus.TraceLabelCreds creds event)) -> do
+  flip traceWith (WithSeverity sev event) $ fanning $ \(WithSeverity _ e) ->
     case e of
       Consensus.TraceStartLeadershipCheck{} -> teeForge' (ftForgeAboutToLead ft)
       Consensus.TraceSlotIsImmutable{} -> teeForge' (ftTraceSlotIsImmutable ft)
@@ -520,22 +559,8 @@ teeForge ft nodeKern tverb tr = Tracer $ \ev@(WithSeverity sev event) -> do
       Consensus.TraceForgedInvalidBlock{} -> teeForge' (ftForgedInvalid ft)
       Consensus.TraceAdoptedBlock{} -> teeForge' (ftAdopted ft)
   case event of
-    Consensus.TraceStartLeadershipCheck slot -> do
-      !utxoSize <- mapNodeKernelDataIO nkUtxoSize nodeKern
-      meta <- mkLOMeta sev Public
-      traceNamedObject tr
-        ( meta
-        , LogStructured $ Map.fromList $
-          [("kind", String "TraceStartLeadershipCheck")
-          ,("slot", toJSON $ unSlotNo slot)]
-          ++ fromSMaybe [] ((:[]) . ("utxoSize",) . toJSON <$> utxoSize))
+    Consensus.TraceStartLeadershipCheck slot -> pure ()
     _ -> traceWith (toLogObject' tverb tr) ev
- where
-   nkUtxoSize
-     :: NodeKernel IO RemoteConnectionId LocalConnectionId blk -> IO Int
-   nkUtxoSize NodeKernel{getChainDB} =
-     atomically (ChainDB.getCurrentLedger getChainDB)
-     <&> ledgerUtxoSize . ledgerState
 
 teeForge'
   :: Trace IO Text
@@ -894,12 +919,17 @@ chainInformation
   -> AF.AnchoredFragment (Header blk)
   -> ChainInformation
 chainInformation newTipInfo frag = ChainInformation
-    { slots       = slotN
-    , blocks      = blockN
-    , density     = calcDensity blockD slotD
+    { slots       = unSlotNo $ fromWithOrigin 0 (AF.headSlot frag)
+    , blocks      = unBlockNo $ fromWithOrigin (BlockNo 1) (AF.headBlockNo frag)
+    , density     = fragmentChainDensity frag
     , epoch       = ChainDB.newTipEpoch newTipInfo
     , slotInEpoch = ChainDB.newTipSlotInEpoch newTipInfo
     }
+
+fragmentChainDensity ::
+  HasHeader (Header blk)
+  => AF.AnchoredFragment (Header blk) -> Rational
+fragmentChainDensity frag = calcDensity blockD slotD
   where
     calcDensity :: Word64 -> Word64 -> Rational
     calcDensity bl sl
@@ -936,10 +966,10 @@ readableTraceBlockchainTimeEvent ev = case ev of
 
 traceCounter
   :: Text
-  -> Word64
   -> Trace IO Text
+  -> Int
   -> IO ()
-traceCounter logValueName aCounter tracer = do
+traceCounter logValueName tracer aCounter = do
   meta <- mkLOMeta Notice Public
   traceNamedObject (appendName "metrics" tracer)
                    (meta, LogValue logValueName (PureI $ fromIntegral aCounter))
