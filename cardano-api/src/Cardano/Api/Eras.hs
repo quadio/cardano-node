@@ -20,5 +20,5 @@ data Shelley
 -- | A type used as a tag to distinguish the Allegra era.
 data Allegra
 
-  -- | A type used as a tag to distinguish the Mary era.
+-- | A type used as a tag to distinguish the Mary era.
 data Mary
