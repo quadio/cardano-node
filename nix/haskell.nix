@@ -112,7 +112,7 @@ let
       })
       {
         packages = lib.genAttrs projectPackages
-          (name: { configureFlags = [ "--ghc-option=-Werror" ]; });
+          (name: { configureFlags = [ "--ghc-option=-Werror" "--ghc-option=-debug" "--ghc-option=-g" ]; });
       }
       (lib.optionalAttrs profiling {
         enableLibraryProfiling = true;
