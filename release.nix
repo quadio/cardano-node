@@ -103,6 +103,7 @@ let
   # Paths or prefixes of paths of derivations to build only on the default system (ie. linux on hydra):
   onlyBuildOnDefaultSystem = [
     ["checks" "hlint"] ["dockerImage"] ["clusterTests"] ["nixosTests"]
+    [ "checks" "tests" "smash" "db-spec-test"] [ "haskellPackages" "smash" "checks" "db-spec-test"]
   ];
   # Paths or prefix of paths for which cross-builds (mingwW64, musl64) are disabled:
   noCrossBuild = [

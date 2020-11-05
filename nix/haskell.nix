@@ -11,7 +11,17 @@
 # Enable profiling
 , profiling ? false
 # Enable asserts for given packages
-, assertedPackages ? []
+, assertedPackages ? [
+      "ouroboros-consensus"
+      "ouroboros-consensus-cardano"
+      "ouroboros-consensus-byron"
+      "ouroboros-consensus-shelley"
+      "small-steps"
+      "byron-spec-ledger"
+      "shelley-spec-ledger"
+      "ouroboros-network"
+      "network-mux"
+    ]
 # Version info, to be passed when not building from a git work tree
 , gitrev ? null
 , libsodium ? pkgs.libsodium
@@ -119,8 +129,14 @@ let
         packages.cardano-node.components.exes.cardano-node.enableExecutableProfiling = true;
       })
       {
+        packages.cardano-node.components.exes.cardano-node.dontStrip = true;
+      }
+      {
         packages = lib.genAttrs assertedPackages
-          (name: { flags.asserts = true; });
+          (name: {
+            flags.asserts = true;
+            configureFlags = [ "--ghc-option=-debug" "--ghc-option=-g" ];
+            });
       }
       ({ pkgs, ... }: lib.mkIf pkgs.stdenv.hostPlatform.isLinux {
         # systemd can't be statically linked
