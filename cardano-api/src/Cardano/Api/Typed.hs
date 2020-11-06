@@ -326,6 +326,7 @@ module Cardano.Api.Typed (
     toByronTxOut,
     toShelleyNetwork,
     toShelleyPoolParams,
+    toShelleyStakeAddr,
     toNetworkMagic,
 
     Shelley.Addr(..),
