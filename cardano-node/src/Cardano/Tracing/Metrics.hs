@@ -1,10 +1,13 @@
 
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE DisambiguateRecordFields #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -13,13 +16,23 @@ module Cardano.Tracing.Metrics
   , MaxKESEvolutions (..)
   , OperationalCertStartKESPeriod (..)
   , HasKESMetricsData (..)
+  , ForgingStats (..)
+  , ForgeThreadStats (..)
+  , mapForgingCurrentThreadStats
+  , mapForgingCurrentThreadStats_
+  , mapForgingStatsTxsProcessed
+  , mkForgingStats
+  , threadStatsProjection
   ) where
 
 import           Cardano.Prelude hiding (All, (:.:))
 
 import           Cardano.Crypto.KES.Class (Period)
+import           Control.Concurrent.STM
+import           Data.IORef (IORef, atomicModifyIORef', newIORef)
+import qualified Data.Map.Strict as Map
 import           Data.SOP.Strict (All, hcmap, K (..), hcollapse)
-import           Ouroboros.Consensus.Block (ForgeStateInfo)
+import           Ouroboros.Consensus.Block (ForgeStateInfo, SlotNo)
 import           Ouroboros.Consensus.Byron.Ledger.Block (ByronBlock)
 import           Ouroboros.Consensus.HardFork.Combinator
 import           Ouroboros.Consensus.TypeFamilyWrappers (WrapForgeStateInfo (..))
@@ -86,3 +99,86 @@ instance All HasKESMetricsData xs => HasKESMetricsData (HardForkBlock xs) where
              => WrapForgeStateInfo blk
              -> K KESMetricsData blk
       getOne = K . getKESMetricsData (Proxy @blk) . unwrapForgeStateInfo
+
+-- | This structure stores counters of blockchain-related events,
+--   per individual forge thread.
+--   These counters are driven by traces.
+data ForgingStats
+  = ForgingStats
+  { fsTxsProcessedNum :: !(IORef Int)
+    -- ^ Transactions removed from mempool.
+  , fsState           :: !(TVar (Map ThreadId (TVar ForgeThreadStats)))
+  }
+
+-- | Per-forging-thread statistics.
+data ForgeThreadStats = ForgeThreadStats
+  { -- ftsFirstSlot                 :: !SlotNo
+    -- ^ First slot when the corresponding forging thread was active,
+    --   which serves as point of origin for its statistics.
+  -- , ftsLeadershipChecksInitiated :: !Int
+  -- , ftsNodeCannotForgeNum        :: !Int
+    ftsNodeIsLeaderNum           :: !Int
+  -- , ftsNodeNotLeaderNum          :: !Int
+  , ftsBlocksForgedNum           :: !Int
+  -- , ftsBlocksForgedInvalidNum    :: !Int
+  , ftsSlotsMissedNum            :: !Int
+    -- ^ Potentially missed slots.  Note that this is not the same as the number
+    -- of missed blocks, since this includes all occurences of not reaching a
+    -- leadership check decision, whether or not leadership was possible or not.
+    --
+    -- Also note that when the aggregate total for this metric is reported in the
+    -- multi-pool case, it can be much larger than the actual number of slots
+    -- occuring since node start, for it is a sum total for all threads.
+  , ftsLastSlot :: !SlotNo
+  }
+
+mkForgingStats :: IO ForgingStats
+mkForgingStats =
+  ForgingStats
+    <$> newIORef 0
+    <*> newTVarIO mempty
+
+mapForgingStatsTxsProcessed ::
+     ForgingStats
+  -> (Int -> Int)
+  -> IO Int
+mapForgingStatsTxsProcessed fs f =
+  atomicModifyIORef' (fsTxsProcessedNum fs) $
+    \txCount -> (f txCount, txCount)
+
+mapForgingCurrentThreadStats ::
+     SlotNo
+  -> ForgingStats
+  -> (ForgeThreadStats -> (ForgeThreadStats, a))
+  -> IO a
+mapForgingCurrentThreadStats _curSlot ForgingStats { fsState } f = do
+  tid <- myThreadId
+  allStats <- atomically $ readTVar fsState
+  varStats <- case Map.lookup tid allStats of
+    Nothing -> do
+      varStats <- newTVarIO $ ForgeThreadStats 0 0 0 0
+      atomically $ modifyTVar fsState $ Map.insert tid varStats
+      return varStats
+    Just varStats ->
+      return varStats
+  atomically $ do
+    stats <- readTVar varStats
+    let !(!stats', x) = f stats
+    writeTVar varStats stats'
+    return x
+
+mapForgingCurrentThreadStats_ ::
+     SlotNo
+  -> ForgingStats
+  -> (ForgeThreadStats -> ForgeThreadStats)
+  -> IO ()
+mapForgingCurrentThreadStats_ curSlot fs f =
+  void $ mapForgingCurrentThreadStats curSlot fs ((, ()) . f)
+
+threadStatsProjection ::
+     ForgingStats
+  -> (ForgeThreadStats -> a)
+  -> IO [a]
+threadStatsProjection fs f = atomically $ do
+  allStats <- readTVar (fsState fs)
+  mapM (fmap f . readTVar) $ Map.elems allStats
